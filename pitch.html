@@ -45,6 +45,19 @@
   #name { font-size: clamp(34px, 7vw, 76px); font-weight: 800; line-height: 1; }
   #which { font-size: clamp(16px, 2.6vw, 26px); opacity: .75; margin-top: 8px; }
 
+  #modes { display: flex; gap: 12px; }
+  .mode { border: 0; border-radius: 14px; padding: 16px 28px; font-size: 24px; font-weight: 700; background: #333; color: #fff; cursor: pointer; }
+  .mode.on { background: #4363d8; }
+  /* find mode: keyboard is shown while guessing, names hidden; keys are clickable */
+  body.find.play #stage { display: none; }
+  body.find.play #kb { display: block; }
+  body.find:not(.revealed) .key { color: transparent; cursor: pointer; }
+  body.find:not(.revealed) .key.off { pointer-events: none; }
+  .key.wrong { animation: shake .3s; background: #e63946 !important; }
+  @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+  body.find.play #hint2 { display: block; }
+  #hint2 { display: none; text-align: center; padding: 8px; font-size: clamp(18px, 3vw, 30px); opacity: .6; }
+
   body.play #start { display: none; }
   body.play #game { display: flex; }
   body.revealed #stage { display: none; }
@@ -59,6 +72,10 @@
     <div class="row"><h2>Octaves up</h2><button id="uMinus">−</button><div class="n" id="uVal">0</div><button id="uPlus">+</button></div>
     <div class="row"><h2>Octaves down</h2><button id="dMinus">−</button><div class="n" id="dVal">0</div><button id="dPlus">+</button></div>
     <div id="range"></div>
+    <div id="modes">
+      <button class="mode on" data-mode="show">Show me</button>
+      <button class="mode" data-mode="find">Find the key</button>
+    </div>
     <button id="go">Start</button>
   </div>
 
@@ -66,6 +83,7 @@
   <div id="game">
     <div id="oct"></div>
     <div id="stage"><div id="ear">👂</div><div id="hint">Click to hear a note</div></div>
+    <div id="hint2">Click anywhere to hear a note</div>
     <div id="kb"></div>
     <div id="answer"><div id="name"></div><div id="which"></div></div>
   </div>
@@ -135,9 +153,16 @@ $("uPlus").onclick  = () => { up = Math.min(MAXOCT, up + 1); refresh(); };
 $("dMinus").onclick = () => { down = Math.max(0, down - 1); refresh(); };
 $("dPlus").onclick  = () => { down = Math.min(MAXOCT, down + 1); refresh(); };
 refresh();
+let mode = "show";   // "show" = click anywhere to reveal (default); "find" = must click the right key
+document.querySelectorAll(".mode").forEach(b => b.onclick = () => {
+  mode = b.dataset.mode;
+  document.querySelectorAll(".mode").forEach(x => x.classList.toggle("on", x === b));
+});
 $("go").onclick = () => {
   markActive(keys);
   $("oct").textContent = (up || down) ? `Octaves: −${down} to +${up}` : "One octave";
+  document.body.classList.toggle("find", mode === "find");
+  $("hint2").textContent = "Click anywhere to hear a note";
   document.body.classList.add("play");
 };
 
@@ -151,8 +176,20 @@ function next() {
   state = "listening";
   document.body.classList.remove("revealed"); keys.forEach(k => k.classList.remove("lit"));
   $("hint").textContent = "What note is it?  Click to see";
+  $("hint2").textContent = "Which key was it?";
   tone(freq(NOTES[n][1], curOct));
 }
+// find mode: clicking a key checks the guess
+keys.forEach((k, i) => k.addEventListener("click", e => {
+  if (mode !== "find" || state !== "listening") return;   // in show mode the click falls through to reveal/next
+  e.stopPropagation();
+  if (i === cur) { reveal(); $("hint2").textContent = "Click anywhere for the next note"; }
+  else {
+    k.classList.remove("wrong"); void k.offsetWidth; k.classList.add("wrong");
+    setTimeout(() => k.classList.remove("wrong"), 400);
+    tone(freq(NOTES[cur][1], curOct));                    // replay the target so they can try again
+  }
+}));
 function reveal() {
   state = "revealed";
   const name = NOTES[cur][0];
@@ -163,14 +200,18 @@ function reveal() {
   tone(freq(NOTES[cur][1], curOct));
   setTimeout(() => say(name.replace("#", " sharp")), 500);
 }
-$("game").addEventListener("click", () => { if (state === "listening") reveal(); else next(); });
+$("game").addEventListener("click", () => {
+  if (state !== "listening") next();
+  else if (mode === "show") reveal();
+  else tone(freq(NOTES[cur][1], curOct));   // find mode: clicking off the keys just replays the note
+});
 
 // One step back: game → start screen → game menu
 $("back").addEventListener("click", e => {
   e.stopPropagation();
   if (document.body.classList.contains("play")) {
-    document.body.classList.remove("play", "revealed");
-    keys.forEach(k => k.classList.remove("lit"));
+    document.body.classList.remove("play", "revealed", "find");
+    keys.forEach(k => k.classList.remove("lit", "wrong"));
     state = "idle"; cur = null;
     $("hint").textContent = "Click to hear a note";
     if ("speechSynthesis" in window) speechSynthesis.cancel();
