@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Color Wall</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; background: #111; color: #fff; transition: background .15s; user-select: none; }
+
+  /* ---------- start screen ---------- */
+  #start { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; }
+  #start h1 { font-size: clamp(28px, 5vw, 48px); font-weight: 700; opacity: .9; }
+  #picker { display: flex; align-items: center; gap: 24px; }
+  #home { position: fixed; top: 16px; left: 16px; font-size: 44px; text-decoration: none; line-height: 1; padding: 12px; border-radius: 16px; background: #222; }
+  button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  #picker button {
+    width: 130px; height: 130px; border-radius: 50%; border: 0; font-size: 72px; font-weight: 700;
+    background: #333; color: #fff; cursor: pointer;
+  }
+  #picker button:active { background: #555; }
+  #count { font-size: clamp(90px, 18vw, 160px); font-weight: 800; min-width: 2.2ch; text-align: center; }
+  #preview { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 80vw; }
+  #preview i { display: block; width: 28px; height: 28px; border-radius: 6px; border: 1px solid rgba(255,255,255,.25); }
+  #go {
+    border: 0; border-radius: 22px; padding: 26px 0; width: min(80vw, 520px); font-size: 44px; font-weight: 800;
+    background: #3cb44b; color: #fff; cursor: pointer;
+  }
+  #go:active { background: #2e9a3c; }
+
+  /* ---------- grid ---------- */
+  #grid { display: none; grid-auto-rows: 1fr; gap: 4px; padding: 4px; flex: 1; min-height: 0; }
+  .sw { border: 0; cursor: pointer; border-radius: 6px; transition: transform .08s; }
+  .sw:hover { transform: scale(1.03); }
+
+  /* ---------- full-colour screen ---------- */
+  #label { height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center;
+           font-weight: 700; letter-spacing: .02em; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+  #label.light { color: #111; text-shadow: none; }
+  #back {
+    display: none; position: fixed; left: 16px; top: 50%; transform: translateY(-50%);
+    width: 120px; height: 120px; border-radius: 50%; border: 4px solid rgba(255,255,255,.85);
+    background: rgba(0,0,0,.35); color: #fff; font-size: 64px; line-height: 1; cursor: pointer;
+    align-items: center; justify-content: center; z-index: 10;
+  }
+  #back.light { border-color: rgba(0,0,0,.7); background: rgba(255,255,255,.4); color: #111; }
+
+  body.play #start { display: none; }
+  body.play #grid { display: grid; }
+  body.full #grid { display: none; }
+  body.full #label { flex: 1; height: auto; align-items: flex-end; padding-bottom: 5vh; font-size: clamp(32px, 8vw, 96px); cursor: pointer; }
+  body.full #back { display: flex; }
+</style>
+</head>
+<body>
+  <div id="start">
+    <a id="home" href="index.html" aria-label="Home">🏠</a>
+    <h1>How many colors?</h1>
+    <div id="picker">
+      <button id="minus">−</button>
+      <div id="count">8</div>
+      <button id="plus">+</button>
+    </div>
+    <div id="preview"></div>
+    <button id="go">Start</button>
+  </div>
+
+  <div id="grid"></div>
+  <div id="label"></div>
+  <button id="back" title="Back" aria-label="Back">&#8592;</button>
+
+<script>
+// Order = the order colours are added as the count goes up.
+const colors = [
+  // the basics
+  ["Black","#000000"],["White","#ffffff"],["Yellow","#ffe119"],["Red","#d42020"],["Blue","#4363d8"],
+  ["Pink","#e8397a"],["Purple","#911eb4"],["Green","#3cb44b"],
+  // more greens
+  ["Light Green","#9be07a"],["Forest Green","#1f6b2e"],["Dark Green","#0f3d1f"],["Mint","#aaffc3"],
+  // more blues
+  ["Sky Blue","#87ceeb"],["Light Blue","#6fa3f5"],["Dark Blue","#1f2f8a"],
+  // more purples / pinks
+  ["Violet","#8f00ff"],["Lavender","#c9a8f0"],["Lilac","#c8a2c8"],["Hot Pink","#ff69b4"],["Magenta","#f032e6"],
+  // teals
+  ["Teal","#469990"],["Turquoise","#40e0d0"],
+  // everything else
+  ["Orange","#f58231"],["Peach","#ffb6a3"],["Brown","#9a6324"],["Tan","#d2b48c"],["Beige","#d4b996"],
+  ["Coral","#ff7f50"],["Olive","#808000"],["Cherry","#d2042d"],["Gray","#888888"],["Slate","#708090"],
+];
+const isLight = hex => {
+  const n = parseInt(hex.slice(1), 16);
+  return (0.299*(n>>16) + 0.587*((n>>8)&255) + 0.114*(n&255)) > 160;
+};
+
+const body = document.body, grid = document.getElementById("grid"), label = document.getElementById("label");
+const countEl = document.getElementById("count"), preview = document.getElementById("preview");
+const MIN = 2, MAX = colors.length;
+let count = 8;
+
+// ---------- start screen ----------
+function drawPreview() {
+  countEl.textContent = count;
+  preview.innerHTML = colors.slice(0, count).map(([, h]) => `<i style="background:${h}"></i>`).join("");
+}
+document.getElementById("minus").onclick = () => { count = Math.max(MIN, count - 1); drawPreview(); };
+document.getElementById("plus").onclick  = () => { count = Math.min(MAX, count + 1); drawPreview(); };
+document.getElementById("go").onclick = startGame;
+drawPreview();
+
+// ---------- grid ----------
+function startGame() {
+  const cols = Math.ceil(Math.sqrt(count * 2));          // roughly 2:1 landscape grid
+  grid.style.gridTemplateColumns = `repeat(${Math.min(cols, 8)}, 1fr)`;
+  grid.innerHTML = "";
+  colors.slice(0, count).forEach(([name, hex]) => {
+    const b = document.createElement("button");
+    b.className = "sw"; b.style.background = hex; b.setAttribute("aria-label", name);
+    b.onclick = e => { e.stopPropagation(); show(name, hex); };
+    grid.appendChild(b);
+  });
+  body.classList.add("play");
+}
+
+// ---------- full-colour screen ----------
+function say(name) {
+  if (!("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(name); u.rate = 0.85; u.lang = "en-US";
+  speechSynthesis.speak(u);
+}
+let current = "";
+function show(name, hex) {
+  current = name;
+  body.style.background = hex;
+  body.classList.add("full");
+  label.textContent = "";
+  label.classList.toggle("light", isLight(hex));
+  document.getElementById("back").classList.toggle("light", isLight(hex));
+}
+function back() {
+  body.classList.remove("full");
+  body.style.background = "#111";
+  label.textContent = ""; label.classList.remove("light");
+}
+document.getElementById("back").addEventListener("click", e => { e.stopPropagation(); back(); });
+// any click on the colour screen reveals the word and says it (repeat clicks say it again)
+body.addEventListener("click", () => {
+  if (!body.classList.contains("full")) return;
+  label.textContent = current; say(current);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") back(); });
+</script>
+</body>
+</html>

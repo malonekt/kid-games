@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pitch Game</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; background: #1b1b22; color: #fff; user-select: none; }
+
+  /* ---------- start screen ---------- */
+  #start { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 16px; }
+  #home { position: fixed; top: 16px; left: 16px; font-size: 44px; text-decoration: none; line-height: 1; padding: 12px; border-radius: 16px; background: #222; }
+  button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  .row { display: flex; align-items: center; gap: 18px; }
+  .row h2 { font-size: clamp(20px, 3vw, 30px); font-weight: 600; opacity: .85; width: 200px; text-align: right; }
+  .row button { width: 72px; height: 72px; border-radius: 50%; border: 0; font-size: 44px; font-weight: 700; background: #333; color: #fff; cursor: pointer; }
+  .row button:active { background: #555; }
+  .row .n { font-size: clamp(56px, 9vw, 88px); font-weight: 800; min-width: 2ch; text-align: center; }
+  #prev { position: relative; width: min(80vw, 560px); height: 110px; }
+  #range { font-size: 20px; opacity: .7; }
+  #go { border: 0; border-radius: 16px; padding: 16px 64px; font-size: 34px; font-weight: 800; background: #3cb44b; color: #fff; cursor: pointer; }
+
+  /* ---------- game ---------- */
+  #game { display: none; flex: 1; flex-direction: column; cursor: pointer; }
+  #oct { text-align: center; padding: 10px; font-size: clamp(16px, 2.4vw, 24px); opacity: .7; }
+  #stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+  #ear { font-size: clamp(90px, 24vw, 220px); }
+  #hint { font-size: clamp(18px, 3vw, 30px); opacity: .6; text-align: center; }
+  #kb { display: none; position: relative; flex: 1; margin: 16px; min-height: 0; }
+  .key { position: absolute; top: 0; border-radius: 0 0 10px 10px; display: flex; align-items: flex-end; justify-content: center;
+         padding-bottom: 12px; font-size: clamp(16px, 3vw, 36px); font-weight: 700; }
+  .white { background: #f4f4f4; color: #222; height: 100%; width: 14.2857%; box-shadow: inset -2px 0 0 #bbb; }
+  .black { background: #222; color: #fff; height: 60%; width: 9%; z-index: 2; box-shadow: 0 4px 8px rgba(0,0,0,.6); }
+  .key.off { opacity: .18; }                       /* keys not in play */
+  .key.lit { background: #ffd166 !important; color: #222 !important; box-shadow: 0 0 0 6px #ff9f1c; opacity: 1; }
+  #prev .key { font-size: 14px; padding-bottom: 6px; border-radius: 0 0 5px 5px; }
+  #answer { display: none; height: 120px; flex-direction: column; align-items: center; justify-content: center; }
+  #name { font-size: clamp(34px, 7vw, 76px); font-weight: 800; line-height: 1; }
+  #which { font-size: clamp(16px, 2.6vw, 26px); opacity: .75; margin-top: 8px; }
+
+  body.play #start { display: none; }
+  body.play #game { display: flex; }
+  body.revealed #stage { display: none; }
+  body.revealed #kb { display: block; }
+  body.revealed #answer { display: flex; }
+</style>
+</head>
+<body>
+  <div id="start">
+    <a id="home" href="index.html" aria-label="Home">🏠</a>
+    <div class="row"><h2>Notes</h2><button id="nMinus">−</button><div class="n" id="nVal">2</div><button id="nPlus">+</button></div>
+    <div id="prev"></div>
+    <div class="row"><h2>Octaves up</h2><button id="uMinus">−</button><div class="n" id="uVal">0</div><button id="uPlus">+</button></div>
+    <div class="row"><h2>Octaves down</h2><button id="dMinus">−</button><div class="n" id="dVal">0</div><button id="dPlus">+</button></div>
+    <div id="range"></div>
+    <button id="go">Start</button>
+  </div>
+
+  <div id="game">
+    <div id="oct"></div>
+    <div id="stage"><div id="ear">👂</div><div id="hint">Click to hear a note</div></div>
+    <div id="kb"></div>
+    <div id="answer"><div id="name"></div><div id="which"></div></div>
+  </div>
+
+<script>
+// ---------- notes (index = semitones above C) ----------
+const NOTES = [["C",0,"white"],["C#",1,"black"],["D",2,"white"],["D#",3,"black"],["E",4,"white"],["F",5,"white"],
+               ["F#",6,"black"],["G",7,"white"],["G#",8,"black"],["A",9,"white"],["A#",10,"black"],["B",11,"white"]];
+// Order notes are added as difficulty rises: spread-out white keys first, then black keys.
+const ORDER = ["C","A","F","D","G","E","B","F#","C#","G#","D#","A#"];
+const idxOf = n => NOTES.findIndex(x => x[0] === n);
+const freq = (semi, oct) => 261.63 * Math.pow(2, semi / 12 + (oct - 4));   // C4 = middle C
+
+let nCount = 2, up = 0, down = 0;
+const MAXOCT = 4;
+
+// ---------- audio ----------
+let ctx;
+function tone(f) {
+  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === "suspended") ctx.resume();
+  const t = ctx.currentTime, out = ctx.createGain();
+  out.gain.setValueAtTime(0, t);
+  out.gain.linearRampToValueAtTime(0.5, t + 0.01);
+  out.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
+  out.connect(ctx.destination);
+  [[1,1],[2,.35],[3,.15],[4,.06]].forEach(([h,a]) => {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "sine"; o.frequency.value = f * h; g.gain.value = a;
+    o.connect(g).connect(out); o.start(t); o.stop(t + 2);
+  });
+}
+function say(text) {
+  if (!("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text); u.rate = 0.85; u.lang = "en-US";
+  speechSynthesis.speak(u);
+}
+
+// ---------- keyboards ----------
+function buildKeyboard(el) {
+  el.innerHTML = ""; let w = 0;
+  NOTES.forEach(([name,,kind]) => {
+    const k = document.createElement("div");
+    k.className = "key " + kind; k.textContent = name;
+    k.style.left = (kind === "white" ? w++ * 14.2857 : w * 14.2857 - 4.5) + "%";
+    el.appendChild(k);
+  });
+  return [...el.children];
+}
+const prevKeys = buildKeyboard(document.getElementById("prev"));
+const keys = buildKeyboard(document.getElementById("kb"));
+const active = () => ORDER.slice(0, nCount).map(idxOf);
+function markActive(list) { const a = active(); list.forEach((k, i) => k.classList.toggle("off", !a.includes(i))); }
+
+// ---------- start screen ----------
+const $ = id => document.getElementById(id);
+function refresh() {
+  $("nVal").textContent = nCount; $("uVal").textContent = up; $("dVal").textContent = down;
+  markActive(prevKeys);
+  $("range").textContent = (up || down) ? `Octaves in play: −${down} to +${up}` : "One octave (middle C)";
+}
+$("nMinus").onclick = () => { nCount = Math.max(2, nCount - 1); refresh(); };
+$("nPlus").onclick  = () => { nCount = Math.min(12, nCount + 1); refresh(); };
+$("uMinus").onclick = () => { up = Math.max(0, up - 1); refresh(); };
+$("uPlus").onclick  = () => { up = Math.min(MAXOCT, up + 1); refresh(); };
+$("dMinus").onclick = () => { down = Math.max(0, down - 1); refresh(); };
+$("dPlus").onclick  = () => { down = Math.min(MAXOCT, down + 1); refresh(); };
+refresh();
+$("go").onclick = () => {
+  markActive(keys);
+  $("oct").textContent = (up || down) ? `Octaves: −${down} to +${up}` : "One octave";
+  document.body.classList.add("play");
+};
+
+// ---------- game loop: click → note, click → answer, click → next ----------
+let cur = null, curOct = 4, state = "idle";
+const octText = o => o === 4 ? "middle octave" : (o > 4 ? `+${o - 4} octave${o - 4 > 1 ? "s" : ""}` : `−${4 - o} octave${4 - o > 1 ? "s" : ""}`);
+function next() {
+  const pool = active(); let n;
+  do { n = pool[Math.floor(Math.random() * pool.length)]; } while (n === cur && pool.length > 1);
+  cur = n; curOct = 4 - down + Math.floor(Math.random() * (up + down + 1));
+  state = "listening";
+  document.body.classList.remove("revealed"); keys.forEach(k => k.classList.remove("lit"));
+  $("hint").textContent = "What note is it?  Click to see";
+  tone(freq(NOTES[n][1], curOct));
+}
+function reveal() {
+  state = "revealed";
+  const name = NOTES[cur][0];
+  keys[cur].classList.add("lit");
+  $("name").textContent = name;
+  $("which").textContent = (up || down) ? octText(curOct) : "";
+  document.body.classList.add("revealed");
+  tone(freq(NOTES[cur][1], curOct));
+  setTimeout(() => say(name.replace("#", " sharp")), 500);
+}
+$("game").addEventListener("click", () => { if (state === "listening") reveal(); else next(); });
+document.addEventListener("keydown", e => { if (e.key === "r" && cur !== null) tone(freq(NOTES[cur][1], curOct)); });
+</script>
+</body>
+</html>
