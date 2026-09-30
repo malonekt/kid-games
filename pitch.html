@@ -128,7 +128,7 @@ function refresh() {
   markActive(prevKeys);
   $("range").textContent = (up || down) ? `Octaves in play: −${down} to +${up}` : "One octave (middle C)";
 }
-$("nMinus").onclick = () => { nCount = Math.max(2, nCount - 1); refresh(); };
+$("nMinus").onclick = () => { nCount = Math.max(1, nCount - 1); refresh(); };
 $("nPlus").onclick  = () => { nCount = Math.min(12, nCount + 1); refresh(); };
 $("uMinus").onclick = () => { up = Math.max(0, up - 1); refresh(); };
 $("uPlus").onclick  = () => { up = Math.min(MAXOCT, up + 1); refresh(); };
